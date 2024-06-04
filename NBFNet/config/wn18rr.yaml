@@ -1,0 +1,53 @@
+output_dir: ~/experiments/
+load: ~/WN18RR/run/model_epoch_10.pth
+rotate: ~/SimKGC-main/data/WN18RR/RotatE/
+complex: ~/SimKGC-main/data/WN18RR/ComplEx/
+simkgc: ~/SimKGC-main/
+ranklist_path: None
+weight_path: None
+feature_path: None
+train_model: yes
+
+dataset:
+  class: WN18RR
+  root: ~/datasets/knowledge_graphs/WN18RR
+
+model:
+  class: NBFNet
+  input_dim: 32
+  hidden_dims: [32, 32, 32, 32, 32, 32]
+  message_func: distmult
+  aggregate_func: pna
+  short_cut: yes
+  layer_norm: yes
+  dependent: no
+  loss: margin
+  init: 2.0
+  need_nbf: yes
+  need_sim: yes
+  need_rotate: yes
+  need_complex: no
+  method: ensemble
+  rerank: forward
+  ensemble_nbf: yes
+  ensemble_sim: no
+  ensemble_atomic: yes
+  ensemble_hidden_dim: 32
+  div: no
+  get_feat: no
+
+task:
+  num_negative: 9999 # Changed
+  strict_negative: yes
+  adversarial_temperature: 2.0 # Changed
+  metric: [mr, mrr, hits@1, hits@3, hits@10, hits@100]
+
+optimizer:
+  class: Adam
+  lr: 5.0e-5 # Changed
+
+train:
+  gpus: {{ gpus }}
+  batch_size: 16
+  num_epoch: 1
+  log_interval: 1
