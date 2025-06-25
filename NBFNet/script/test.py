@@ -16,6 +16,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from nbfnet import tasks, util
 # from script.RNNLogic_integrate import get_WN_mappings, get_index_dict, get_SimKGC_scores 
 
+logger = None
 
 separator = ">" * 30
 line = "-" * 30
@@ -25,6 +26,7 @@ line = "-" * 30
 def load_model(cfg, model):
     world_size = util.get_world_size()
     rank = util.get_rank()
+    device = util.get_device(cfg)
     if rank == 0:
         logger.warning("Load checkpoint")
     state = torch.load(cfg.output_dir + cfg.load, map_location=device)
@@ -36,6 +38,7 @@ def load_model(cfg, model):
 def test(cfg, model, test_data, filtered_data=None):
     world_size = util.get_world_size()
     rank = util.get_rank()
+    device = util.get_device(cfg)
 
     test_triplets = torch.cat([test_data.target_edge_index, test_data.target_edge_type.unsqueeze(0)]).t()
     sampler = torch_data.DistributedSampler(test_triplets, world_size, rank)
@@ -117,6 +120,7 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed + util.get_rank())
 
     logger = util.get_root_logger()
+    globals()['logger'] = logger
     if util.get_rank() == 0:
         logger.warning("Random seed: %d" % args.seed)
         logger.warning("Config file: %s" % args.config)

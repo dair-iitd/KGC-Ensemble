@@ -42,7 +42,7 @@ class SimKGC():
         self.re_index = [nbf2rnnent[_] for _ in range(len(nbf2rnnent))]
         self.re_rel = [nbf2rnnrel[_] for _ in range(len(nbf2rnnrel))]
 
-        t_file = os.path.join(prefix, f'{DATASET}_Vectors/SimKGC_t_rep.pkl')
+        t_file = os.path.join(prefix, f'{dataset}_Vectors/SimKGC_t_rep.pkl')
         t_emb = pickle.load(open(t_file, 'rb'))
         t_emb = t_emb[self.re_index, :]
         self.t_emb = t_emb.t().cpu()
@@ -51,7 +51,7 @@ class SimKGC():
 
         for _ in self.re_rel:
             print(f'Loading for relation {_}')
-            h_file = os.path.join(prefix, f'{DATASET}_Vectors/SimKGC_h_{_}_rep.pkl')
+            h_file = os.path.join(prefix, f'{dataset}_Vectors/SimKGC_h_{_}_rep.pkl')
             h_emb = pickle.load(open(h_file, 'rb'))
             h_emb = h_emb[self.re_index, :]
             self.h_embs.append(h_emb.cpu())

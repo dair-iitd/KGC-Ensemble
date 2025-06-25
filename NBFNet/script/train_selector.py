@@ -21,6 +21,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from nbfnet import tasks, util
 import json
 
+logger = None
 
 separator = ">" * 30
 line = "-" * 30
@@ -36,7 +37,7 @@ def load_model(cfg, model, device):
     util.synchronize()
 
 
-def train_and_validate(cfg, train_data, valid_data, model, filtered_data=None):
+def train_and_validate(cfg, model, device, train_data, valid_data, filtered_data=None, nbfentmap_rev=None, nbfrelmap_rev=None):
     if cfg.train.num_epoch == 0:
         return
 
@@ -47,8 +48,9 @@ def train_and_validate(cfg, train_data, valid_data, model, filtered_data=None):
     sampler = torch_data.DistributedSampler(train_triplets, world_size, rank)
     train_loader = torch_data.DataLoader(train_triplets, cfg.train.batch_size, sampler=sampler)
 
-    cls = cfg.optimizer.pop("class")
-    optimizer = getattr(optim, cls)(model.parameters(), **cfg.optimizer)
+    cls = cfg.optimizer.get("class", "Adam")
+    optimizer_params = {k: v for k, v in cfg.optimizer.items() if k != "class"}
+    optimizer = getattr(optim, cls)(model.parameters(), **optimizer_params)
     if world_size > 1:
         parallel_model = nn.parallel.DistributedDataParallel(model, device_ids=[device], find_unused_parameters=True)
     else:
@@ -75,7 +77,7 @@ def train_and_validate(cfg, train_data, valid_data, model, filtered_data=None):
                 # print(batch)
                 batch = tasks.negative_sampling(train_data, batch, cfg.task.num_negative,
                                                 strict=cfg.task.strict_negative)
-                pred, _ = parallel_model(train_data, batch, (epoch+1)/cfg.train.num_epoch, hard_wts=None)
+                pred, _ = parallel_model(train_data, batch, hard_wts=None)
                 # print(pred)
 
                 # target = torch.zeros_like(pred)
@@ -141,7 +143,7 @@ def train_and_validate(cfg, train_data, valid_data, model, filtered_data=None):
         if rank == 0:
             logger.warning(separator)
             logger.warning("Evaluate on valid")
-        result = test(cfg, valid_data, model, wts=None, filtered_data=filtered_data)
+        result = test(cfg, valid_data, model, wts=None, filtered_data=filtered_data, nbfentmap_rev=nbfentmap_rev, nbfrelmap_rev=nbfrelmap_rev)
         if result > best_result:
             best_result = result
             best_epoch = epoch
@@ -150,9 +152,10 @@ def train_and_validate(cfg, train_data, valid_data, model, filtered_data=None):
 
 
 @torch.no_grad()
-def test(cfg, test_data, model, wts=None, filtered_data=None):
+def test(cfg, test_data, model, wts=None, filtered_data=None, nbfentmap_rev=None, nbfrelmap_rev=None):
     world_size = util.get_world_size()
     rank = util.get_rank()
+    device = util.get_device(cfg)
 
     test_triplets = torch.cat([test_data.target_edge_index, test_data.target_edge_type.unsqueeze(0)]).t()
     sampler = torch_data.DistributedSampler(test_triplets, world_size, rank)
@@ -167,14 +170,18 @@ def test(cfg, test_data, model, wts=None, filtered_data=None):
     h_types = []
     t_types = []
 
+    ranklist_file = None
+    weight_file = None
+    feature_file = None
+    
     if (cfg.ranklist_path != "None"):
-        fi = open(cfg.ranklist_path, 'w')
+        ranklist_file = open(cfg.ranklist_path, 'w')
 
     if (cfg.weight_path != "None"):
-        fi = open(cfg.weight_path, 'w')
+        weight_file = open(cfg.weight_path, 'w')
     
     if (cfg.feature_path != "None"):
-        fi = open(cfg.feature_path, 'w')
+        feature_file = open(cfg.feature_path, 'w')
 
     for batch in test_loader:
         t_batch, h_batch = tasks.all_negative(test_data, batch)
@@ -215,9 +222,9 @@ def test(cfg, test_data, model, wts=None, filtered_data=None):
             t_feat = t_pred.tolist()
             h_feat = h_pred.tolist()
             for _ in range(len(h_index)):
-                fi.write(f'{nbfentmap_rev[h_index[_]]}\t{nbfrelmap_rev[r_index[_]]}\t{nbfentmap_rev[t_index[_]]}\t{" ".join([str(_) for _ in t_feat[_]])}\n')
+                feature_file.write(f'{nbfentmap_rev[h_index[_]]}\t{nbfrelmap_rev[r_index[_]]}\t{nbfentmap_rev[t_index[_]]}\t{" ".join([str(_) for _ in t_feat[_]])}\n')
                 print(f'{nbfentmap_rev[h_index[_]]}\t{nbfrelmap_rev[r_index[_]]}\t{nbfentmap_rev[t_index[_]]}\t{" ".join([str(_) for _ in t_feat[_]])}\n')
-                fi.write(f'{nbfentmap_rev[t_index[_]]}\t!{nbfrelmap_rev[r_index[_]]}\t{nbfentmap_rev[h_index[_]]}\t{" ".join([str(_) for _ in h_feat[_]])}\n')
+                feature_file.write(f'{nbfentmap_rev[t_index[_]]}\t!{nbfrelmap_rev[r_index[_]]}\t{nbfentmap_rev[h_index[_]]}\t{" ".join([str(_) for _ in h_feat[_]])}\n')
                 print(f'{nbfentmap_rev[t_index[_]]}\t!{nbfrelmap_rev[r_index[_]]}\t{nbfentmap_rev[h_index[_]]}\t{" ".join([str(_) for _ in h_feat[_]])}\n')
 
         if (not cfg.model.get_feat):
@@ -236,9 +243,9 @@ def test(cfg, test_data, model, wts=None, filtered_data=None):
                 r_index = r_index.tolist()
                 t_index = t_index.tolist()
                 for _ in range(len(h_index)):
-                    fi.write(f'{nbfentmap_rev[h_index[_]]}\t{nbfrelmap_rev[r_index[_]]}\t{nbfentmap_rev[t_index[_]]}\t{t_ranking[_]}\n')
+                    ranklist_file.write(f'{nbfentmap_rev[h_index[_]]}\t{nbfrelmap_rev[r_index[_]]}\t{nbfentmap_rev[t_index[_]]}\t{t_ranking[_]}\n')
                     print(f'{nbfentmap_rev[h_index[_]]}\t{nbfrelmap_rev[r_index[_]]}\t{nbfentmap_rev[t_index[_]]}\t{t_ranking[_]}\n')
-                    fi.write(f'{nbfentmap_rev[t_index[_]]}\t!{nbfrelmap_rev[r_index[_]]}\t{nbfentmap_rev[h_index[_]]}\t{h_ranking[_]}\n')
+                    ranklist_file.write(f'{nbfentmap_rev[t_index[_]]}\t!{nbfrelmap_rev[r_index[_]]}\t{nbfentmap_rev[h_index[_]]}\t{h_ranking[_]}\n')
                     print(f'{nbfentmap_rev[t_index[_]]}\t!{nbfrelmap_rev[r_index[_]]}\t{nbfentmap_rev[h_index[_]]}\t{h_ranking[_]}\n')
                 
             if (cfg.weight_path != "None"):
@@ -246,9 +253,9 @@ def test(cfg, test_data, model, wts=None, filtered_data=None):
                 r_index = r_index.tolist()
                 t_index = t_index.tolist()
                 for _ in range(len(h_index)):
-                    fi.write(f'{nbfentmap_rev[h_index[_]]}\t{nbfrelmap_rev[r_index[_]]}\t{nbfentmap_rev[t_index[_]]}\t{t_weight[_]}\n')
+                    weight_file.write(f'{nbfentmap_rev[h_index[_]]}\t{nbfrelmap_rev[r_index[_]]}\t{nbfentmap_rev[t_index[_]]}\t{t_weight[_]}\n')
                     print(f'{nbfentmap_rev[h_index[_]]}\t{nbfrelmap_rev[r_index[_]]}\t{nbfentmap_rev[t_index[_]]}\t{t_weight[_]}\n')
-                    fi.write(f'{nbfentmap_rev[t_index[_]]}\t!{nbfrelmap_rev[r_index[_]]}\t{nbfentmap_rev[h_index[_]]}\t{h_weight[_]}\n')
+                    weight_file.write(f'{nbfentmap_rev[t_index[_]]}\t!{nbfrelmap_rev[r_index[_]]}\t{nbfentmap_rev[h_index[_]]}\t{h_weight[_]}\n')
                     print(f'{nbfentmap_rev[t_index[_]]}\t!{nbfrelmap_rev[r_index[_]]}\t{nbfentmap_rev[h_index[_]]}\t{h_weight[_]}\n')
 
             rankings += [t_ranking, h_ranking]
@@ -368,6 +375,14 @@ def test(cfg, test_data, model, wts=None, filtered_data=None):
             logger.warning("%s: %g" % (metric, score))
 
     mrr = (1 / all_ranking.float()).mean()
+    
+    # Close files if they were opened
+    if ranklist_file:
+        ranklist_file.close()
+    if weight_file:
+        weight_file.close()
+    if feature_file:
+        feature_file.close()
 
     return mrr
 
@@ -380,6 +395,7 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed + util.get_rank())
 
     logger = util.get_root_logger()
+    globals()['logger'] = logger
     if util.get_rank() == 0:
         logger.warning("Random seed: %d" % args.seed)
         logger.warning("Config file: %s" % args.config)
@@ -425,7 +441,7 @@ if __name__ == "__main__":
         filtered_data = filtered_data.to(device)
 
     if (cfg.train_model):
-        train_and_validate(cfg, valid_data, test_data, model, filtered_data=filtered_data)
+        train_and_validate(cfg, model, device, train_data, valid_data, filtered_data=filtered_data, nbfentmap_rev=nbfentmap_rev, nbfrelmap_rev=nbfrelmap_rev)
     else:
-        test(cfg, test_data, model, wts=None, filtered_data=filtered_data)
+        test(cfg, test_data, model, wts=None, filtered_data=filtered_data, nbfentmap_rev=nbfentmap_rev, nbfrelmap_rev=nbfrelmap_rev)
     

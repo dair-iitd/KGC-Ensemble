@@ -212,6 +212,6 @@ class Selector(nn.Module):
                         wt = hard_wts[3]
                     result += wt*complex_score
             if (self.cfg.weight_path is not None):
-                return result, nbf_weight
+                return result, weight
             else:
                 return result, None

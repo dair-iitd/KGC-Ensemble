@@ -14,13 +14,15 @@ import torch
 from torch import distributed as dist
 from torch_geometric.data import Data, InMemoryDataset
 from torch_geometric.datasets import RelLinkPredDataset, WordNet18RR
-from RNNLogic_integrate import get_WN_mappings
+sys.path.append(os.path.join(os.path.dirname(__file__), '../script'))
+from integrate import get_WN_mappings
 
 from nbfnet import models, datasets
 
 
 logger = logging.getLogger(__file__)
-nbf2rnnent, nbf2rnnrel, _, _ = get_WN_mappings()
+# Initialize with default values for WN18RR dataset
+nbf2rnnent, nbf2rnnrel, _, _ = get_WN_mappings('WN18RR', os.path.expanduser('~/datasets/knowledge_graphs/WN18RR'))
 rnn2nbfent = {nbf2rnnent[_]:_ for _ in nbf2rnnent}
 rnn2nbfrel = {nbf2rnnrel[_]:_ for _ in nbf2rnnrel}
 NUM_RELATIONS = 11

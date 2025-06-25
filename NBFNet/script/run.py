@@ -16,6 +16,7 @@ import pickle
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from nbfnet import tasks, util
 
+logger = None
 
 separator = ">" * 30
 line = "-" * 30
@@ -26,13 +27,15 @@ def train_and_validate(cfg, model, train_data, valid_data, filtered_data=None):
 
     world_size = util.get_world_size()
     rank = util.get_rank()
+    device = util.get_device(cfg)
 
     train_triplets = torch.cat([train_data.target_edge_index, train_data.target_edge_type.unsqueeze(0)]).t()
     sampler = torch_data.DistributedSampler(train_triplets, world_size, rank)
     train_loader = torch_data.DataLoader(train_triplets, cfg.train.batch_size, sampler=sampler)
 
-    cls = cfg.optimizer.pop("class")
-    optimizer = getattr(optim, cls)(model.parameters(), **cfg.optimizer)
+    cls = cfg.optimizer.get("class", "Adam")
+    optimizer_params = {k: v for k, v in cfg.optimizer.items() if k != "class"}
+    optimizer = getattr(optim, cls)(model.parameters(), **optimizer_params)
     if world_size > 1:
         parallel_model = nn.parallel.DistributedDataParallel(model, device_ids=[device])
     else:
@@ -128,6 +131,7 @@ def train_and_validate(cfg, model, train_data, valid_data, filtered_data=None):
 def test(cfg, model, test_data, filtered_data=None):
     world_size = util.get_world_size()
     rank = util.get_rank()
+    device = util.get_device(cfg)
 
     test_triplets = torch.cat([test_data.target_edge_index, test_data.target_edge_type.unsqueeze(0)]).t()
     sampler = torch_data.DistributedSampler(test_triplets, world_size, rank)
@@ -222,6 +226,7 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed + util.get_rank())
 
     logger = util.get_root_logger()
+    globals()['logger'] = logger
     if util.get_rank() == 0:
         logger.warning("Random seed: %d" % args.seed)
         logger.warning("Config file: %s" % args.config)

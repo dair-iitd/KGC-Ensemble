@@ -14,7 +14,7 @@ nbfrel = {
         '_verb_group': 10,
     }
 
-def get_WN_mappings(dataset, root, rotate = False):
+def get_WN_mappings(dataset, root, rotate = False, WN = 0):
     if (dataset == 'WN18RR'):
         PREFIX = root +'/raw/'
         NUM_RELATIONS = 11
